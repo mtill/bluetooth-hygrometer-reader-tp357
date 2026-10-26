@@ -1,106 +1,220 @@
 #!/usr/bin/env python3
 # coding=utf-8
 
-
-import os
-import sys
-import logging
-logger = logging.getLogger(__name__)
 import asyncio
+import base64
 import datetime
-from bleak import BleakScanner, BleakClient
+import json
+import logging
+from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+from bleak import BleakClient, BleakScanner
 
 
-thepath = "data"
-uuid_write = "00010203-0405-0607-0809-0a0b0c0d2b11"
-uuid_read  = "00010203-0405-0607-0809-0a0b0c0d2b10"
-cmd = b"\xa7\x00\x00\x00\x00\x7a"   # day
-#cmd = b"\xa6\x00\x00\x00\x00\x6a"   #week
-#cmd = b"\xa8\x00\x00\x00\x00\x8a"   #year
-hum_delta = 1.0
-temp_delta = 0.5
-time_delta_seconds = 900
-
-last_hum = None
-last_hum_timestamp = 0
-last_temp = None
-last_temp_timestamp = 0
-fin_evt = asyncio.Event()
-files_datestr = None
+logger = logging.getLogger(__name__)
+script_dir = Path(__file__).resolve().parent
+config_path = script_dir / "config.json"
 
 
-def callback(sender, data):
-    global logger, last_hum, last_hum_timestamp, last_temp, last_temp_timestamp, hum_delta, temp_delta, time_delta_seconds
+def load_config():
+    with config_path.open(encoding="utf-8") as config_file:
+        loaded_config = json.load(config_file)
 
-    logger.debug(f"{sender}: {data}")
-    temp = (data[3] + data[4] * 256) / 10
-    humi = data[5]
-    #battery = data[6]   # not sure!
-
-    thedate = datetime.datetime.now()
-    ts = thedate.timestamp()
-    datestr = thedate.strftime("%Y-%m-%d")
-    timestr = thedate.strftime("%H:%M:%S")
-
-    logger.debug("temp: " + str(temp))
-    logger.debug("hum: " + str(humi))
-
-    if last_temp is None or ts - last_temp_timestamp >= time_delta_seconds or abs(last_temp - temp) >= temp_delta:
-        with open(temp_path + "/" + datestr + ".csv", "a", buffering=1) as the_file:
-            the_file.write(timestr + ";" + str(temp) + "\n")
-        last_temp = temp
-        last_temp_timestamp = ts
-    if last_hum is None or ts - last_hum_timestamp >= time_delta_seconds or abs(last_hum - humi) >= hum_delta:
-        with open(hum_path + "/" + datestr + ".csv", "a", buffering=1) as the_file:
-            the_file.write(timestr + ";" + str(humi) + "\n")
-        last_hum = humi
-        last_hum_timestamp = ts
-    #print(battery)
+    ntfy = loaded_config["ntfy"]
+    token = ntfy.get("token", "")
+    username = ntfy.get("username", "")
+    password = ntfy.get("password", "")
+    if token and (username or password):
+        raise ValueError("Configure either ntfy token or username/password, not both")
+    if bool(username) != bool(password):
+        raise ValueError("Configure both ntfy username and password")
+    return loaded_config
 
 
-def handle_disconnect(_: BleakClient):
-    global logger, fin_evt
-    logger.info("disconnected.")
-    fin_evt.set()
+config = load_config()
 
 
-async def main(address):
-    global logger, fin_evt, uuid_read, uuid_write, cmd
-
-    while True:
-        try:
-            device = await BleakScanner.find_device_by_address(address)
-            if device:
-                async with BleakClient(device, disconnected_callback=handle_disconnect, pair=False) as client:
-                    logger.info(f"{client.address} connected")
-
-                    await client.start_notify(uuid_read, callback)
-                    #await client.write_gatt_char(uuid_write, cmd, response=False)
-                    #for s in client.services:
-                    #    print(s.description)
-                    #    for c in s.characteristics:
-                    #        print(c)
-                    #        print(c.properties)
-                    #        print()
-                    #    print()
-
-                    await fin_evt.wait()
-                    await client.stop_notify(uuid_read)
-
-        except:
-            logger.warning("something went wrong.")
-        finally:
-            fin_evt.clear()
-            await asyncio.sleep(30)
+def publish_ntfy(title, message):
+    ntfy = config["ntfy"]
+    url = ntfy["server"].rstrip("/") + "/" + quote(ntfy["topic"], safe="")
+    headers = {"Title": title}
+    if ntfy.get("token"):
+        headers["Authorization"] = "Bearer " + ntfy["token"]
+    elif ntfy.get("username"):
+        credentials = f'{ntfy["username"]}:{ntfy["password"]}'.encode("utf-8")
+        headers["Authorization"] = "Basic " + base64.b64encode(credentials).decode("ascii")
+    request = Request(url, data=message.encode("utf-8"), headers=headers, method="POST")
+    with urlopen(request, timeout=10):
+        pass
 
 
-address = sys.argv[1]
-name = sys.argv[2]
-logging.basicConfig(filename='/var/tmp/hum-' + name + '.log', level=logging.ERROR, style='{', format='{asctime} {levelname} {filename}:{lineno}: {message}', datefmt='%Y-%m-%d %H:%M:%S')
-hum_path = thepath + "/" + name.replace("/", "_") + "_humidity"
-temp_path = thepath + "/" + name.replace("/", "_") + "_temperature"
-os.makedirs(hum_path, exist_ok=True)
-os.makedirs(temp_path, exist_ok=True)
-asyncio.run(main(address))
+async def send_ntfy_notification(title, message):
+    try:
+        await asyncio.to_thread(publish_ntfy, title, message)
+    except (URLError, TimeoutError, OSError):
+        logger.exception("Failed to send ntfy notification")
 
 
+def configured_sensors():
+    if "sensors" in config:
+        sensors = config["sensors"]
+    else:
+        sensors = [{
+            "device_address": config["device_address"],
+            "location": config["location"],
+        }]
+
+    if not sensors:
+        raise ValueError("Configure at least one sensor")
+
+    addresses = [sensor["device_address"] for sensor in sensors]
+    safe_locations = [sensor["location"].replace("/", "_") for sensor in sensors]
+    if len(set(addresses)) != len(addresses):
+        raise ValueError("Each sensor must have a unique device_address")
+    if len(set(safe_locations)) != len(safe_locations):
+        raise ValueError("Each sensor must have a unique location")
+    return sensors
+
+
+class SensorMonitor:
+    def __init__(self, sensor):
+        self.sensor = sensor
+        self.location = sensor["location"]
+        safe_location = self.location.replace("/", "_")
+        data_dir = Path(config["data_directory"])
+        if not data_dir.is_absolute():
+            data_dir = script_dir / data_dir
+        self.hum_path = data_dir / (safe_location + "_humidity")
+        self.temp_path = data_dir / (safe_location + "_temperature")
+        self.hum_path.mkdir(parents=True, exist_ok=True)
+        self.temp_path.mkdir(parents=True, exist_ok=True)
+
+        self.last_hum = None
+        self.last_hum_timestamp = 0
+        self.last_temp = None
+        self.last_temp_timestamp = 0
+        self.critical_metrics_state = set()
+        self.disconnected = asyncio.Event()
+        self.loop = asyncio.get_running_loop()
+
+    def callback(self, sender, data):
+        logger.debug("%s (%s): %s", self.location, sender, data)
+        temp = (data[3] + data[4] * 256) / 10
+        humi = data[5]
+
+        now = datetime.datetime.now()
+        timestamp = now.timestamp()
+        datestr = now.strftime("%Y-%m-%d")
+        timestr = now.strftime("%H:%M:%S")
+
+        logger.debug("%s temperature: %s", self.location, temp)
+        logger.debug("%s humidity: %s", self.location, humi)
+
+        storage = config["storage"]
+        time_delta_seconds = storage["time_delta_seconds"]
+        if (
+            self.last_temp is None
+            or timestamp - self.last_temp_timestamp >= time_delta_seconds
+            or abs(self.last_temp - temp) >= storage["temperature_delta"]
+        ):
+            with (self.temp_path / (datestr + ".csv")).open("a", buffering=1) as data_file:
+                data_file.write(timestr + ";" + str(temp) + "\n")
+            self.last_temp = temp
+            self.last_temp_timestamp = timestamp
+        if (
+            self.last_hum is None
+            or timestamp - self.last_hum_timestamp >= time_delta_seconds
+            or abs(self.last_hum - humi) >= storage["humidity_delta"]
+        ):
+            with (self.hum_path / (datestr + ".csv")).open("a", buffering=1) as data_file:
+                data_file.write(timestr + ";" + str(humi) + "\n")
+            self.last_hum = humi
+            self.last_hum_timestamp = timestamp
+
+        default_ranges = config["critical"]
+        sensor_ranges = self.sensor.get("critical", {})
+        temperature_range = sensor_ranges.get(
+            "temperature_c",
+            default_ranges["temperature_c"],
+        )
+        humidity_range = sensor_ranges.get(
+            "humidity_percent",
+            default_ranges["humidity_percent"],
+        )
+        critical_metrics = set()
+        if not temperature_range[0] <= temp <= temperature_range[1]:
+            critical_metrics.add("temperature")
+        if not humidity_range[0] <= humi <= humidity_range[1]:
+            critical_metrics.add("humidity")
+
+        newly_critical = critical_metrics - self.critical_metrics_state
+        newly_uncritical = self.critical_metrics_state - critical_metrics
+        if newly_critical or newly_uncritical:
+            statuses = []
+            if newly_critical:
+                statuses.append("Critical: " + ", ".join(sorted(newly_critical)))
+            if newly_uncritical:
+                statuses.append("Back in range: " + ", ".join(sorted(newly_uncritical)))
+            if newly_critical and newly_uncritical:
+                status_title = "Hygrometer status changed"
+            elif newly_critical:
+                status_title = "Hygrometer critical"
+            else:
+                status_title = "Hygrometer recovered"
+            title = f"{self.location}: {status_title}"
+            message = (
+                f"{'; '.join(statuses)}. Current: "
+                f"temperature {temp}°C, humidity {humi}%"
+            )
+            self.loop.create_task(send_ntfy_notification(title, message))
+        self.critical_metrics_state = critical_metrics
+
+    def handle_disconnect(self, _: BleakClient):
+        logger.info("%s disconnected.", self.location)
+        self.disconnected.set()
+
+    async def run(self):
+        bluetooth = config["bluetooth"]
+        while True:
+            try:
+                device = await BleakScanner.find_device_by_address(self.sensor["device_address"])
+                if device:
+                    async with BleakClient(
+                        device,
+                        disconnected_callback=self.handle_disconnect,
+                        pair=False,
+                    ) as client:
+                        logger.info("%s connected", client.address)
+                        await client.start_notify(bluetooth["uuid_read"], self.callback)
+                        await self.disconnected.wait()
+                        await client.stop_notify(bluetooth["uuid_read"])
+            except Exception:
+                logger.exception("Sensor worker failed for %s", self.location)
+            finally:
+                self.disconnected.clear()
+                await asyncio.sleep(bluetooth["reconnect_seconds"])
+
+
+async def main():
+    sensors = configured_sensors()
+    monitors = [SensorMonitor(sensor) for sensor in sensors]
+    await asyncio.gather(*(monitor.run() for monitor in monitors))
+
+
+sensor_configs = configured_sensors()
+logging_config = config["logging"]
+logging.basicConfig(
+    filename=logging_config["file"].format(
+        location=sensor_configs[0]["location"].replace("/", "_")
+        if len(sensor_configs) == 1
+        else "all-sensors"
+    ),
+    level=getattr(logging, logging_config["level"].upper()),
+    style="{",
+    format="{asctime} {levelname} {filename}:{lineno}: {message}",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+asyncio.run(main())

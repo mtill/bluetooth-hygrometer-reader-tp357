@@ -1,0 +1,45 @@
+{
+  "sensors": [
+    {
+      "device_address": "REPLACE_WITH_FIRST_SENSOR_ADDRESS",
+      "location": "living-room",
+      "critical": {
+        "temperature_c": [18, 28]
+      }
+    },
+    {
+      "device_address": "REPLACE_WITH_SECOND_SENSOR_ADDRESS",
+      "location": "bedroom",
+      "critical": {
+        "humidity_percent": [35, 60]
+      }
+    }
+  ],
+  "data_directory": "data",
+  "logging": {
+    "file": "/var/tmp/hum-{location}.log",
+    "level": "ERROR"
+  },
+  "bluetooth": {
+    "uuid_write": "00010203-0405-0607-0809-0a0b0c0d2b11",
+    "uuid_read": "00010203-0405-0607-0809-0a0b0c0d2b10",
+    "command_hex": "a7000000007a",
+    "reconnect_seconds": 30
+  },
+  "storage": {
+    "humidity_delta": 1.0,
+    "temperature_delta": 0.5,
+    "time_delta_seconds": 900
+  },
+  "critical": {
+    "temperature_c": [18, 35],
+    "humidity_percent": [40, 60]
+  },
+  "ntfy": {
+    "server": "https://ntfy.sh",
+    "topic": "smarthome",
+    "token": "",
+    "username": "",
+    "password": ""
+  }
+}
