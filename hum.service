@@ -1,0 +1,14 @@
+[Unit]
+Description=matter-watchdog
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bluetooth-hygrometer-reader-tp357
+ExecStart=/usr/bin/python3 %h/bluetooth-hygrometer-reader-tp357/hum.py
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

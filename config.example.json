@@ -20,12 +20,6 @@
     "file": "/var/tmp/hum-{location}.log",
     "level": "ERROR"
   },
-  "bluetooth": {
-    "uuid_write": "00010203-0405-0607-0809-0a0b0c0d2b11",
-    "uuid_read": "00010203-0405-0607-0809-0a0b0c0d2b10",
-    "command_hex": "a7000000007a",
-    "reconnect_seconds": 30
-  },
   "storage": {
     "humidity_delta": 1.0,
     "temperature_delta": 0.5,

@@ -18,12 +18,17 @@ logger = logging.getLogger(__name__)
 script_dir = Path(__file__).resolve().parent
 config_path = script_dir / "config.json"
 
+UUID_WRITE = "00010203-0405-0607-0809-0a0b0c0d2b11"
+UUID_READ = "00010203-0405-0607-0809-0a0b0c0d2b10"
+COMMAND_HEX = "a7000000007a"
+RECONNECT_SECONDS = 30
+
 
 def load_config():
     with config_path.open(encoding="utf-8") as config_file:
         loaded_config = json.load(config_file)
 
-    ntfy = loaded_config["ntfy"]
+    ntfy = loaded_config.get("ntfy") or {}
     token = ntfy.get("token", "")
     username = ntfy.get("username", "")
     password = ntfy.get("password", "")
@@ -38,8 +43,13 @@ config = load_config()
 
 
 def publish_ntfy(title, message):
-    ntfy = config["ntfy"]
-    url = ntfy["server"].rstrip("/") + "/" + quote(ntfy["topic"], safe="")
+    ntfy = config.get("ntfy") or {}
+    server = ntfy.get("server")
+    topic = ntfy.get("topic")
+    if not server or not topic:
+        return
+
+    url = server.rstrip("/") + "/" + quote(topic, safe="")
     headers = {"Title": title}
     if ntfy.get("token"):
         headers["Authorization"] = "Bearer " + ntfy["token"]
@@ -177,7 +187,6 @@ class SensorMonitor:
         self.disconnected.set()
 
     async def run(self):
-        bluetooth = config["bluetooth"]
         while True:
             try:
                 device = await BleakScanner.find_device_by_address(self.sensor["device_address"])
@@ -188,14 +197,14 @@ class SensorMonitor:
                         pair=False,
                     ) as client:
                         logger.info("%s connected", client.address)
-                        await client.start_notify(bluetooth["uuid_read"], self.callback)
+                        await client.start_notify(UUID_READ, self.callback)
                         await self.disconnected.wait()
-                        await client.stop_notify(bluetooth["uuid_read"])
+                        await client.stop_notify(UUID_READ)
             except Exception:
                 logger.exception("Sensor worker failed for %s", self.location)
             finally:
                 self.disconnected.clear()
-                await asyncio.sleep(bluetooth["reconnect_seconds"])
+                await asyncio.sleep(RECONNECT_SECONDS)
 
 
 async def main():
