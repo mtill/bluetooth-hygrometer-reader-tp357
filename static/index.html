@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hygrometer readings</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <main>
+    <h1>Hygrometer readings</h1>
+    <p class="subtitle">Temperature and humidity history from your sensors</p>
+    <section class="panel">
+      <div class="controls">
+        <label>Reading<select id="metric">
+          <option value="temperature">Temperature</option>
+          <option value="humidity">Humidity</option>
+        </select></label>
+        <label>Date<select id="date"></select></label>
+      </div>
+      <div class="chart-wrap"><canvas id="chart" aria-label="Sensor readings chart"></canvas></div>
+      <div id="legend" aria-label="Sensors"></div>
+      <p id="status" role="status"></p>
+    </section>
+  </main>
+  <script src="/static/dashboard.js" defer></script>
+</body>
+</html>

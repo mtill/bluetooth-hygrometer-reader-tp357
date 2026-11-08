@@ -18,6 +18,10 @@ continue to work; switch to the `sensors` list to add more devices.
 The BLE UUIDs, command, and reconnect interval are fixed constants in
 `hum.py`, rather than configurable values in `config.json`.
 
+The optional top-level `sensor_colors` object maps sensor location names to
+`#RRGGBB` hex colors for the dashboard. Sensors without a configured color use
+a stable fallback palette based on sorted location names.
+
 Each sensor runs as an independent asyncio task in the same process, with
 separate CSV files and alert state. The top-level `critical` values are the
 default uncritical ranges for all sensors. A sensor can independently override
@@ -39,11 +43,13 @@ Start the browser dashboard from this directory:
 python3 dashboard.py
 ```
 
-Then open <http://127.0.0.1:8000/> in your browser. Choose a sensor location,
-temperature or humidity, and a date. The chart refreshes automatically every
-minute and reads the CSV files in the configured `data_directory`. By default,
+Then open <http://127.0.0.1:8000/> in your browser. Choose temperature or
+humidity and a date to compare all sensors with data for that day in one chart.
+The chart refreshes automatically every minute and reads the CSV files in the
+configured `data_directory`. By default,
 the dashboard listens only on this computer; use `--host` and `--port` to
-change the listening address if needed.
+change the listening address if needed. Keep the `static/` directory alongside
+`dashboard.py`; it contains the dashboard HTML, CSS, and JavaScript files.
 
 ### Start the dashboard automatically
 
